@@ -23,6 +23,8 @@
 #include <AR/ar.h>
 #include <AR/gsub_lite.h>
 
+#include "AkPattern.h"
+
 FILE _iob[] = { *stdin, *stdout, *stderr };
 
 extern "C" FILE * __cdecl __iob_func(void)
@@ -58,17 +60,9 @@ static ARUint8		*gARTImage = NULL;
 static int          gARTImageSavePlease = FALSE;
 
 // Marker detection.
-static ARHandle		*gARHandle = NULL;
-static ARPattHandle	*gARPattHandle = NULL;
-static long			gCallCountMarkerDetect = 0;
-
 // Transformation matrix retrieval.
-static AR3DHandle	*gAR3DHandle = NULL;
-static ARdouble		gPatt_width = 80.0;	// Per-marker, but we are using only 1 marker.
-static ARdouble		gPatt_trans[3][4];		// Per-marker, but we are using only 1 marker.
-static int			gPatt_found = FALSE;	// Per-marker, but we are using only 1 marker.
-static int			gPatt_id;				// Per-marker, but we are using only 1 marker.
-
+AkPattern Patt_Hiro("Data/Hiro.patt");
+AkPattern Patt_Kanji("Data/kanji.patt");
 											// Drawing.
 static ARParamLT *gCparamLT = NULL;
 static ARGL_CONTEXT_SETTINGS_REF gArglSettings = NULL;
@@ -232,11 +226,11 @@ static void cleanup(void)
 {
 	arglCleanup(gArglSettings);
 	gArglSettings = NULL;
-	arPattDetach(gARHandle);
-	arPattDeleteHandle(gARPattHandle);
+	arPattDetach(Patt_Kanji.gARHandle);
+	arPattDeleteHandle(Patt_Kanji.gARPattHandle);
 	arVideoCapStop();
-	ar3DDeleteHandle(&gAR3DHandle);
-	arDeleteHandle(gARHandle);
+	ar3DDeleteHandle(&Patt_Kanji.gAR3DHandle);
+	arDeleteHandle(Patt_Kanji.gARHandle);
 	arParamLTFree(&gCparamLT);
 	arVideoClose();
 }
@@ -258,23 +252,23 @@ static void Keyboard(unsigned char key, int x, int y)
 		break;
 	case 'X':
 	case 'x':
-		arGetImageProcMode(gARHandle, &mode);
+		arGetImageProcMode(Patt_Kanji.gARHandle, &mode);
 		switch (mode) {
 		case AR_IMAGE_PROC_FRAME_IMAGE:  mode = AR_IMAGE_PROC_FIELD_IMAGE; break;
 		case AR_IMAGE_PROC_FIELD_IMAGE:
 		default: mode = AR_IMAGE_PROC_FRAME_IMAGE; break;
 		}
-		arSetImageProcMode(gARHandle, mode);
+		arSetImageProcMode(Patt_Kanji.gARHandle, mode);
 		break;
 	case 'C':
 	case 'c':
-		ARLOGe("*** Camera - %f (frame/sec)\n", (double)gCallCountMarkerDetect / arUtilTimer());
-		gCallCountMarkerDetect = 0;
+		ARLOGe("*** Camera - %f (frame/sec)\n", (double)Patt_Kanji.gCallCountMarkerDetect / arUtilTimer());
+		Patt_Kanji.gCallCountMarkerDetect = 0;
 		arUtilTimerReset();
 		break;
 	case 'a':
 	case 'A':
-		arGetLabelingThreshMode(gARHandle, &modea);
+		arGetLabelingThreshMode(Patt_Kanji.gARHandle, &modea);
 		switch (modea) {
 		case AR_LABELING_THRESH_MODE_MANUAL:        modea = AR_LABELING_THRESH_MODE_AUTO_MEDIAN; break;
 		case AR_LABELING_THRESH_MODE_AUTO_MEDIAN:   modea = AR_LABELING_THRESH_MODE_AUTO_OTSU; break;
@@ -283,7 +277,7 @@ static void Keyboard(unsigned char key, int x, int y)
 		case AR_LABELING_THRESH_MODE_AUTO_BRACKETING:
 		default: modea = AR_LABELING_THRESH_MODE_MANUAL; break;
 		}
-		arSetLabelingThreshMode(gARHandle, modea);
+		arSetLabelingThreshMode(Patt_Kanji.gARHandle, modea);
 		break;
 	case '-':
 		threshChange = -5;
@@ -294,8 +288,8 @@ static void Keyboard(unsigned char key, int x, int y)
 		break;
 	case 'D':
 	case 'd':
-		arGetDebugMode(gARHandle, &mode);
-		arSetDebugMode(gARHandle, !mode);
+		arGetDebugMode(Patt_Kanji.gARHandle, &mode);
+		arSetDebugMode(Patt_Kanji.gARHandle, !mode);
 		break;
 	case 's':
 	case 'S':
@@ -315,11 +309,11 @@ static void Keyboard(unsigned char key, int x, int y)
 	}
 	if (threshChange) {
 		int threshhold;
-		arGetLabelingThresh(gARHandle, &threshhold);
+		arGetLabelingThresh(Patt_Kanji.gARHandle, &threshhold);
 		threshhold += threshChange;
 		if (threshhold < 0) threshhold = 0;
 		if (threshhold > 255) threshhold = 255;
-		arSetLabelingThresh(gARHandle, threshhold);
+		arSetLabelingThresh(Patt_Kanji.gARHandle, threshhold);
 	}
 
 }
@@ -354,46 +348,46 @@ static void mainLoop(void)
 		if (gARTImageSavePlease) {
 			char imageNumberText[15];
 			sprintf(imageNumberText, "image-%04d.jpg", imageNumber++);
-			if (arVideoSaveImageJPEG(gARHandle->xsize, gARHandle->ysize, gARHandle->arPixelFormat, gARTImage, imageNumberText, 75, 0) < 0) {
+			if (arVideoSaveImageJPEG(Patt_Kanji.gARHandle->xsize, Patt_Kanji.gARHandle->ysize, Patt_Kanji.gARHandle->arPixelFormat, gARTImage, imageNumberText, 75, 0) < 0) {
 				ARLOGe("Error saving video image.\n");
 			}
 			gARTImageSavePlease = FALSE;
 		}
 
-		gCallCountMarkerDetect++; // Increment ARToolKit FPS counter.
+		Patt_Kanji.gCallCountMarkerDetect++; // Increment ARToolKit FPS counter.
 
 								  // Detect the markers in the video frame.
-		if (arDetectMarker(gARHandle, gARTImage) < 0) {
+		if (arDetectMarker(Patt_Kanji.gARHandle, gARTImage) < 0) {
 			exit(-1);
 		}
 
 		// Check through the marker_info array for highest confidence
 		// visible marker matching our preferred pattern.
 		k = -1;
-		for (j = 0; j < gARHandle->marker_num; j++) {
-			if (gARHandle->markerInfo[j].id == gPatt_id) {
+		for (j = 0; j < Patt_Kanji.gARHandle->marker_num; j++) {
+			if (Patt_Kanji.gARHandle->markerInfo[j].id == Patt_Kanji.gPatt_id) {
 				if (k == -1) k = j; // First marker detected.
-				else if (gARHandle->markerInfo[j].cf > gARHandle->markerInfo[k].cf) k = j; // Higher confidence marker detected.
+				else if (Patt_Kanji.gARHandle->markerInfo[j].cf > Patt_Kanji.gARHandle->markerInfo[k].cf) k = j; // Higher confidence marker detected.
 			}
 		}
 
 		if (k != -1) {
-			// Get the transformation between the marker and the real camera into gPatt_trans.
+			// Get the transformation between the marker and the real camera into Patt_Kanji.gPatt_trans.
 			if (bFirst) {
-				err = arGetTransMatSquare(gAR3DHandle, &(gARHandle->markerInfo[k]), gPatt_width, gPatt_trans);
+				err = arGetTransMatSquare(Patt_Kanji.gAR3DHandle, &(Patt_Kanji.gARHandle->markerInfo[k]), Patt_Kanji.gPatt_width, Patt_Kanji.gPatt_trans);
 				bFirst = false;
 			}
 			else {
 				ARdouble gPatt_trans_z1[3][4];
-				memcpy(&gPatt_trans_z1, gPatt_trans, sizeof(gPatt_trans_z1));
-				err = arGetTransMatSquareCont(gAR3DHandle, &(gARHandle->markerInfo[k]), gPatt_trans_z1, gPatt_width, gPatt_trans);
+				memcpy(&gPatt_trans_z1, Patt_Kanji.gPatt_trans, sizeof(gPatt_trans_z1));
+				err = arGetTransMatSquareCont(Patt_Kanji.gAR3DHandle, &(Patt_Kanji.gARHandle->markerInfo[k]), gPatt_trans_z1, Patt_Kanji.gPatt_width, Patt_Kanji.gPatt_trans);
 			}
 
-			gPatt_found = TRUE;
+			Patt_Kanji.gPatt_found = TRUE;
 		}
 		else {
 			bFirst = true;
-			gPatt_found = FALSE;
+			Patt_Kanji.gPatt_found = FALSE;
 		}
 
 		// Tell GLUT the display has changed.
@@ -464,11 +458,11 @@ static void Display(void)
 	// (I.e. must be specified before viewing transformations.)
 	//none
 
-	if (gPatt_found) {
+	if (Patt_Kanji.gPatt_found) {
 
 		// Calculate the camera position relative to the marker.
 		// Replace VIEW_SCALEFACTOR with 1.0 to make one drawing unit equal to 1.0 ARToolKit units (usually millimeters).
-		arglCameraViewRH((const ARdouble(*)[4])gPatt_trans, m, VIEW_SCALEFACTOR);
+		arglCameraViewRH((const ARdouble(*)[4])Patt_Kanji.gPatt_trans, m, VIEW_SCALEFACTOR);
 #ifdef ARDOUBLE_IS_FLOAT
 		glLoadMatrixf(m);
 #else
@@ -478,7 +472,7 @@ static void Display(void)
 		// All lighting and geometry to be drawn relative to the marker goes here.
 		DrawCube();
 
-	} // gPatt_found
+	} // Patt_Kanji.gPatt_found
 
 	  // Any 2D overlays go here.
 	glMatrixMode(GL_PROJECTION);
@@ -509,7 +503,6 @@ int main(int argc, char** argv)
 	char glutGamemode[32];
 	char cparam_name[] = "Data/camera_para.dat";
 	char vconf[] = "";
-	char patt_name[] = "Data/kanji.patt";
 
 	//
 	// Library inits.
@@ -521,7 +514,7 @@ int main(int argc, char** argv)
 	// Video setup.
 	//
 
-	if (!setupCamera(cparam_name, vconf, &gCparamLT, &gARHandle, &gAR3DHandle)) {
+	if (!setupCamera(cparam_name, vconf, &gCparamLT, &Patt_Kanji.gARHandle, &Patt_Kanji.gAR3DHandle)) {
 		ARLOGe("main(): Unable to set up AR camera.\n");
 		exit(-1);
 	}
@@ -549,11 +542,11 @@ int main(int argc, char** argv)
 		cleanup();
 		exit(-1);
 	}
-	arglSetupDebugMode(gArglSettings, gARHandle);
+	arglSetupDebugMode(gArglSettings, Patt_Kanji.gARHandle);
 	arUtilTimerReset();
 
 	// Load marker(s).
-	if (!setupMarker(patt_name, &gPatt_id, gARHandle, &gARPattHandle)) {
+	if (!setupMarker(Patt_Kanji.patt_name.c_str(), &Patt_Kanji.gPatt_id, Patt_Kanji.gARHandle, &Patt_Kanji.gARPattHandle)) {
 		ARLOGe("main(): Unable to set up AR marker.\n");
 		cleanup();
 		exit(-1);
@@ -662,7 +655,7 @@ static void printMode()
 
 	// Image size and processing mode.
 	arVideoGetSize(&xsize, &ysize);
-	arGetImageProcMode(gARHandle, &mode);
+	arGetImageProcMode(Patt_Kanji.gARHandle, &mode);
 	if (mode == AR_IMAGE_PROC_FRAME_IMAGE) text_p = "full frame";
 	else text_p = "even field only";
 	snprintf(text, sizeof(text), "Processing %dx%d video frames %s", xsize, ysize, text_p);
@@ -670,7 +663,7 @@ static void printMode()
 	line++;
 
 	// Threshold mode, and threshold, if applicable.
-	arGetLabelingThreshMode(gARHandle, &threshMode);
+	arGetLabelingThreshMode(Patt_Kanji.gARHandle, &threshMode);
 	switch (threshMode) {
 	case AR_LABELING_THRESH_MODE_MANUAL: text_p = "MANUAL"; break;
 	case AR_LABELING_THRESH_MODE_AUTO_MEDIAN: text_p = "AUTO_MEDIAN"; break;
@@ -681,7 +674,7 @@ static void printMode()
 	}
 	snprintf(text, sizeof(text), "Threshold mode: %s", text_p);
 	if (threshMode != AR_LABELING_THRESH_MODE_AUTO_ADAPTIVE) {
-		arGetLabelingThresh(gARHandle, &thresh);
+		arGetLabelingThresh(Patt_Kanji.gARHandle, &thresh);
 		len = (int)strlen(text);
 		snprintf(text + len, sizeof(text) - len, ", thresh=%d", thresh);
 	}
@@ -689,9 +682,9 @@ static void printMode()
 	line++;
 
 	// Border size, image processing mode, pattern detection mode.
-	arGetBorderSize(gARHandle, &tempF);
+	arGetBorderSize(Patt_Kanji.gARHandle, &tempF);
 	snprintf(text, sizeof(text), "Border: %0.1f%%", tempF*100.0);
-	arGetPatternDetectionMode(gARHandle, &mode);
+	arGetPatternDetectionMode(Patt_Kanji.gARHandle, &mode);
 	switch (mode) {
 	case AR_TEMPLATE_MATCHING_COLOR: text_p = "Colour template (pattern)"; break;
 	case AR_TEMPLATE_MATCHING_MONO: text_p = "Mono template (pattern)"; break;
