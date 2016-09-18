@@ -25,6 +25,8 @@
 
 #include "AkPattern.h"
 
+using namespace AKAR;
+
 FILE _iob[] = { *stdin, *stdout, *stderr };
 
 extern "C" FILE * __cdecl __iob_func(void)
@@ -59,10 +61,7 @@ static int windowRefresh = 0;					// Fullscreen mode refresh rate. Set to 0 to u
 static ARUint8		*gARTImage = NULL;
 static int          gARTImageSavePlease = FALSE;
 
-// Marker detection.
-// Transformation matrix retrieval.
-AkPattern Patt_Hiro("Data/Hiro.patt");
-AkPattern Patt_Kanji("Data/kanji.patt");
+AkPattern Patt_Kanji;
 											// Drawing.
 static ARParamLT *gCparamLT = NULL;
 static ARGL_CONTEXT_SETTINGS_REF gArglSettings = NULL;
@@ -203,18 +202,36 @@ static int setupCamera(const char *cparam_name, char *vconf, ARParamLT **cparamL
 	return (TRUE);
 }
 
-static int setupMarker(const char *patt_name, int *patt_id, ARHandle *arhandle, ARPattHandle **pattHandle_p)
+static int setupMarker(AkPattern& patt, ARHandle *arhandle, ARPattHandle **pattHandle_p)
 {
 	if ((*pattHandle_p = arPattCreateHandle()) == NULL) {
 		ARLOGe("setupMarker(): Error: arPattCreateHandle.\n");
 		return (FALSE);
 	}
 
-	// Loading only 1 pattern in this example.
-	if ((*patt_id = arPattLoad(*pattHandle_p, patt_name)) < 0) {
-		ARLOGe("setupMarker(): Error loading pattern file %s.\n", patt_name);
-		arPattDeleteHandle(*pattHandle_p);
-		return (FALSE);
+	// Loading first pattern.
+	{
+		int id = arPattLoad(*pattHandle_p, patt.markers[0].patt_name.c_str());
+		if (id < 0) {
+			ARLOGe("setupMarker(): Error loading pattern file %s.\n", patt.markers[0].patt_name.c_str());
+			arPattDeleteHandle(*pattHandle_p);
+			return (FALSE);
+		}
+		else {
+			patt.markers[0].gPatt_id = id;
+		}
+	}
+
+	{
+		int id = arPattLoad(*pattHandle_p, patt.markers[1].patt_name.c_str());
+		if (id < 0) {
+			ARLOGe("setupMarker(): Error loading pattern file %s.\n", patt.markers[1].patt_name.c_str());
+			arPattDeleteHandle(*pattHandle_p);
+			return (FALSE);
+		}
+		else {
+			patt.markers[1].gPatt_id = id;
+		}
 	}
 
 	arPattAttach(arhandle, *pattHandle_p);
@@ -357,37 +374,34 @@ static void mainLoop(void)
 		Patt_Kanji.gCallCountMarkerDetect++; // Increment ARToolKit FPS counter.
 
 								  // Detect the markers in the video frame.
-		if (arDetectMarker(Patt_Kanji.gARHandle, gARTImage) < 0) {
+		if (!Patt_Kanji.DetectMarker(gARTImage)) {
 			exit(-1);
 		}
 
-		// Check through the marker_info array for highest confidence
-		// visible marker matching our preferred pattern.
-		k = -1;
-		for (j = 0; j < Patt_Kanji.gARHandle->marker_num; j++) {
-			if (Patt_Kanji.gARHandle->markerInfo[j].id == Patt_Kanji.gPatt_id) {
-				if (k == -1) k = j; // First marker detected.
-				else if (Patt_Kanji.gARHandle->markerInfo[j].cf > Patt_Kanji.gARHandle->markerInfo[k].cf) k = j; // Higher confidence marker detected.
-			}
-		}
+		for (int i = 0; i < Patt_Kanji.markers.size(); i++) {
 
-		if (k != -1) {
-			// Get the transformation between the marker and the real camera into Patt_Kanji.gPatt_trans.
-			if (bFirst) {
-				err = arGetTransMatSquare(Patt_Kanji.gAR3DHandle, &(Patt_Kanji.gARHandle->markerInfo[k]), Patt_Kanji.gPatt_width, Patt_Kanji.gPatt_trans);
-				bFirst = false;
+			// Check through the marker_info array for highest confidence
+			// visible marker matching our preferred pattern.
+			k = Patt_Kanji.getHighestConfidenceId(Patt_Kanji.markers[i]);
+
+			if (k != -1) {
+				// Get the transformation between the marker and the real camera into Patt_Kanji.gPatt_trans.
+				if (bFirst) {
+					err = arGetTransMatSquare(Patt_Kanji.gAR3DHandle, &(Patt_Kanji.gARHandle->markerInfo[k]), Patt_Kanji.markers[i].gPatt_width, Patt_Kanji.markers[i].gPatt_trans);
+					bFirst = false;
+				}
+				else {
+					ARdouble gPatt_trans_z1[3][4];
+					memcpy(&gPatt_trans_z1, Patt_Kanji.markers[i].gPatt_trans, sizeof(gPatt_trans_z1));
+					err = arGetTransMatSquareCont(Patt_Kanji.gAR3DHandle, &(Patt_Kanji.gARHandle->markerInfo[k]), gPatt_trans_z1, Patt_Kanji.markers[i].gPatt_width, Patt_Kanji.markers[i].gPatt_trans);
+				}
+
+				Patt_Kanji.markers[i].gPatt_found = TRUE;
 			}
 			else {
-				ARdouble gPatt_trans_z1[3][4];
-				memcpy(&gPatt_trans_z1, Patt_Kanji.gPatt_trans, sizeof(gPatt_trans_z1));
-				err = arGetTransMatSquareCont(Patt_Kanji.gAR3DHandle, &(Patt_Kanji.gARHandle->markerInfo[k]), gPatt_trans_z1, Patt_Kanji.gPatt_width, Patt_Kanji.gPatt_trans);
+				bFirst = true;
+				Patt_Kanji.markers[i].gPatt_found = FALSE;
 			}
-
-			Patt_Kanji.gPatt_found = TRUE;
-		}
-		else {
-			bFirst = true;
-			Patt_Kanji.gPatt_found = FALSE;
 		}
 
 		// Tell GLUT the display has changed.
@@ -458,21 +472,22 @@ static void Display(void)
 	// (I.e. must be specified before viewing transformations.)
 	//none
 
-	if (Patt_Kanji.gPatt_found) {
+	for (int i = 0; i < Patt_Kanji.markers.size(); i++) {
+		if (Patt_Kanji.markers[i].gPatt_found) {
 
-		// Calculate the camera position relative to the marker.
-		// Replace VIEW_SCALEFACTOR with 1.0 to make one drawing unit equal to 1.0 ARToolKit units (usually millimeters).
-		arglCameraViewRH((const ARdouble(*)[4])Patt_Kanji.gPatt_trans, m, VIEW_SCALEFACTOR);
+			// Calculate the camera position relative to the marker.
+			// Replace VIEW_SCALEFACTOR with 1.0 to make one drawing unit equal to 1.0 ARToolKit units (usually millimeters).
+			arglCameraViewRH((const ARdouble(*)[4])Patt_Kanji.markers[i].gPatt_trans, m, VIEW_SCALEFACTOR);
 #ifdef ARDOUBLE_IS_FLOAT
-		glLoadMatrixf(m);
+			glLoadMatrixf(m);
 #else
-		glLoadMatrixd(m);
+			glLoadMatrixd(m);
 #endif
 
-		// All lighting and geometry to be drawn relative to the marker goes here.
-		DrawCube();
-
-	} // Patt_Kanji.gPatt_found
+			// All lighting and geometry to be drawn relative to the marker goes here.
+			DrawCube();
+		}
+	}
 
 	  // Any 2D overlays go here.
 	glMatrixMode(GL_PROJECTION);
@@ -514,6 +529,10 @@ int main(int argc, char** argv)
 	// Video setup.
 	//
 
+
+	Patt_Kanji.addMarker("Data/Hiro.patt", 80.0);
+	Patt_Kanji.addMarker("Data/kanji.patt", 80.0);
+
 	if (!setupCamera(cparam_name, vconf, &gCparamLT, &Patt_Kanji.gARHandle, &Patt_Kanji.gAR3DHandle)) {
 		ARLOGe("main(): Unable to set up AR camera.\n");
 		exit(-1);
@@ -546,7 +565,7 @@ int main(int argc, char** argv)
 	arUtilTimerReset();
 
 	// Load marker(s).
-	if (!setupMarker(Patt_Kanji.patt_name.c_str(), &Patt_Kanji.gPatt_id, Patt_Kanji.gARHandle, &Patt_Kanji.gARPattHandle)) {
+	if (!setupMarker(Patt_Kanji, Patt_Kanji.gARHandle, &Patt_Kanji.gARPattHandle)) {
 		ARLOGe("main(): Unable to set up AR marker.\n");
 		cleanup();
 		exit(-1);
