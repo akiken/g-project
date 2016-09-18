@@ -404,6 +404,26 @@ static void mainLoop(void)
 			}
 		}
 
+		// マーカー間距離を算出
+		if(Patt_Kanji.markers.size() >= 2 && Patt_Kanji.markers[0].gPatt_found && Patt_Kanji.markers[1].gPatt_found){
+			ARdouble wmat1[3][4], wmat2[3][4];
+			double yaw, pitch, roll;
+
+			// ビュー→マーカ行列（カメラ座標系を基準に考えたマーカの位置・姿勢）を取得
+			arUtilMatInv(Patt_Kanji.markers[0].gPatt_trans, wmat1);
+			// マーカ1座標系を基準に考えたマーカ2の位置・姿勢（＝マーカ1とマーカ2の距離・角度の差）を取得
+			arUtilMatMul(wmat1, Patt_Kanji.markers[1].gPatt_trans, wmat2);
+
+			printf("%5.4lf[mm] %5.4lf[mm] %5.4lf[mm] ", wmat2[0][3], wmat2[1][3], wmat2[2][3]);
+
+			// 角度の差を表示（-180°～180°）
+			yaw = atan2(wmat2[1][0], wmat2[0][0]);
+			pitch = atan2(wmat2[2][1], wmat2[2][2]);
+			roll = atan2(wmat2[2][0], sqrt(wmat2[2][1] * wmat2[2][1] + wmat2[2][2] * wmat2[2][2]));
+
+			printf("yaw = %4.4lf pitch = %4.4lf roll = %4.4lf\n", 180.0*yaw / M_PI, 180.0*pitch / M_PI, 180.0*roll / M_PI);
+		}
+
 		// Tell GLUT the display has changed.
 		glutPostRedisplay();
 	}
@@ -497,7 +517,7 @@ static void Display(void)
 	glLoadIdentity();
 	glDisable(GL_LIGHTING);
 	glDisable(GL_DEPTH_TEST);
-
+	
 	//
 	// Draw help text and mode.
 	//
